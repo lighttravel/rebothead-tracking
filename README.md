@@ -182,11 +182,14 @@ adb push yolov8.rknn /userdata/
 ### 5.2 运行程序
 
 ```bash
-# 启动跟踪系统
+# 单独启动跟踪系统
 python3 person_tracking.py
 
 # 单独测试电机
 python3 test_motor_rk3576_native.py
+
+#跟踪运行（这步就能开启头部追踪了！！！安装依赖后可直接这一步）
+python3 start_tracking.py
 
 # 查看视频流
 # 浏览器访问 http://<RK3576_IP>:8080/stream
