@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-水平方向左右跟踪算法（增量控制模式）
+双向跟踪算法（水平+垂直，增量控制模式）
 - 读取person_tracking.py输出的坐标数据
-- 根据目标位置发送增量命令控制电机21（偏航轴）左右转动
+- 根据目标位置发送增量命令同时控制电机21（偏航轴）和电机22（俯仰轴）
 - 使用 motor_controller.py 发送命令
-- 中心区域：图像宽度的 3/8 (37.5%) 到 5/8 (62.5%)
+- 中心区域：图像宽度和高度的 3/8 (37.5%) 到 5/8 (62.5%)
 """
 
 import json
@@ -15,14 +15,14 @@ from pathlib import Path
 from motor_controller import MotorController
 
 
-class HorizontalTracker:
-    """水平方向跟踪控制器"""
+class BidirectionalTracker:
+    """双向跟踪控制器（水平+垂直）"""
 
     def __init__(self, serial_port='/dev/ttyS8', baudrate=115200,
                  center_zone_start=0.375, center_zone_end=0.625,
                  deadzone=0.02, max_delta=0.15, kp=0.5, max_lost_frames=10):
         """
-        初始化跟踪控制器
+        初始化双向跟踪控制器
 
         参数:
             serial_port: 串口设备
@@ -54,6 +54,8 @@ class HorizontalTracker:
             'total_updates': 0,
             'left_moves': 0,
             'right_moves': 0,
+            'up_moves': 0,
+            'down_moves': 0,
             'no_moves': 0,
             'lost_frames': 0,
             'resets_to_zero': 0,
@@ -78,17 +80,15 @@ class HorizontalTracker:
             self.stats['errors'] += 1
         return success
 
-    def calculate_motor_command(self, rel_x):
+    def _calculate_horizontal(self, rel_x):
         """
-        根据目标相对位置计算电机控制指令
+        计算水平方向电机控制指令
 
         参数:
             rel_x: 目标中心点的X相对位置（-1到1，0为中心）
-                    或者在JSON中使用的是position.relative.x
 
         返回:
-            (should_move, delta_yaw, direction)
-            should_move: 是否需要移动
+            (delta_yaw, direction)
             delta_yaw: 转动角度（弧度，正数向右，负数向左）
             direction: 方向描述 ('left', 'right', 'center')
         """
@@ -101,22 +101,88 @@ class HorizontalTracker:
 
         # 检查目标位置
         if normalized_x < self.center_zone_start - self.deadzone:
-            # 目标在左边，需要向左转（反转符号）
+            # 目标在左边，需要向左转
             distance = self.center_zone_start - normalized_x
-            delta_yaw = distance * self.kp  # 正数向左转（修正）
+            delta_yaw = distance * self.kp
             delta_yaw = min(self.max_delta, delta_yaw)  # 限制最大角度
-            return True, delta_yaw, 'left'
+            return delta_yaw, 'left'
 
         elif normalized_x > self.center_zone_end + self.deadzone:
-            # 目标在右边，需要向右转（反转符号）
+            # 目标在右边，需要向右转
             distance = normalized_x - self.center_zone_end
-            delta_yaw = -distance * self.kp  # 负数向右转（修正）
+            delta_yaw = -distance * self.kp
             delta_yaw = max(-self.max_delta, delta_yaw)  # 限制最大角度
-            return True, delta_yaw, 'right'
+            return delta_yaw, 'right'
 
         else:
             # 目标在中心区域，不需要移动
-            return False, 0.0, 'center'
+            return 0.0, 'center'
+
+    def _calculate_vertical(self, rel_y):
+        """
+        计算垂直方向电机控制指令
+
+        参数:
+            rel_y: 目标中心点的Y相对位置（-1到1，0为中心）
+                    注意：在图像坐标系中，y向下为正
+
+        返回:
+            (delta_pitch, direction)
+            delta_pitch: 转动角度（弧度，正数向上，负数向下）
+            direction: 方向描述 ('up', 'down', 'center')
+        """
+        # 将rel_y从[-1, 1]转换到[0, 1]
+        # 如果已经是0-1范围则不用转换
+        if -1 <= rel_y <= 1:
+            normalized_y = (rel_y + 1) / 2  # 转换到0-1
+        else:
+            normalized_y = rel_y
+
+        # 检查目标位置
+        if normalized_y < self.center_zone_start - self.deadzone:
+            # 目标在上方，需要向上转（正值）
+            distance = self.center_zone_start - normalized_y
+            delta_pitch = distance * self.kp
+            delta_pitch = min(self.max_delta, delta_pitch)  # 限制最大角度
+            return delta_pitch, 'up'
+
+        elif normalized_y > self.center_zone_end + self.deadzone:
+            # 目标在下方，需要向下转（负值）
+            distance = normalized_y - self.center_zone_end
+            delta_pitch = -distance * self.kp
+            delta_pitch = max(-self.max_delta, delta_pitch)  # 限制最大角度
+            return delta_pitch, 'down'
+
+        else:
+            # 目标在中心区域，不需要移动
+            return 0.0, 'center'
+
+    def calculate_motor_command(self, rel_x, rel_y):
+        """
+        根据目标相对位置计算电机控制指令（双向）
+
+        参数:
+            rel_x: 目标中心点的X相对位置（-1到1，0为中心）
+            rel_y: 目标中心点的Y相对位置（-1到1，0为中心）
+
+        返回:
+            (should_move, yaw_delta, pitch_delta, direction_h, direction_v)
+            should_move: 是否需要移动
+            yaw_delta: 水平转动角度（弧度）
+            pitch_delta: 垂直转动角度（弧度）
+            direction_h: 水平方向描述 ('left', 'right', 'center')
+            direction_v: 垂直方向描述 ('up', 'down', 'center')
+        """
+        # 计算水平方向
+        yaw_delta, direction_h = self._calculate_horizontal(rel_x)
+
+        # 计算垂直方向
+        pitch_delta, direction_v = self._calculate_vertical(rel_y)
+
+        # 判断是否需要移动
+        should_move = (yaw_delta != 0 or pitch_delta != 0)
+
+        return should_move, yaw_delta, pitch_delta, direction_h, direction_v
 
     def update(self, coords_file):
         """
@@ -154,33 +220,45 @@ class HorizontalTracker:
 
             # 获取相对位置
             rel_x = primary['position']['relative']['x']
+            rel_y = primary['position']['relative']['y']
             confidence = primary['confidence']
             target_id = primary['id']
 
-            # 计算控制指令
-            should_move, delta_yaw, direction = self.calculate_motor_command(rel_x)
+            # 计算控制指令（双向）
+            should_move, yaw_delta, pitch_delta, dir_h, dir_v = self.calculate_motor_command(rel_x, rel_y)
 
             # 更新统计
             self.stats['total_updates'] += 1
 
             if should_move:
-                # 发送增量命令
-                success = self.send_motor_delta(delta_yaw, 0.0)
+                # 发送增量命令（同时控制水平和垂直）
+                success = self.send_motor_delta(yaw_delta, pitch_delta)
 
                 if success:
-                    if direction == 'left':
+                    # 更新水平方向统计
+                    if dir_h == 'left':
                         self.stats['left_moves'] += 1
-                        print(f"🔴 目标{target_id}在左侧 | rel_x={rel_x:.3f} | 向左转 {abs(delta_yaw):.3f}rad")
-                    else:
+                    elif dir_h == 'right':
                         self.stats['right_moves'] += 1
-                        print(f"🔵 目标{target_id}在右侧 | rel_x={rel_x:.3f} | 向右转 {abs(delta_yaw):.3f}rad")
+
+                    # 更新垂直方向统计
+                    if dir_v == 'up':
+                        self.stats['up_moves'] += 1
+                    elif dir_v == 'down':
+                        self.stats['down_moves'] += 1
+
+                    # 构建方向描述
+                    h_desc = f"向左转{abs(yaw_delta):.3f}rad" if dir_h == 'left' else (f"向右转{abs(yaw_delta):.3f}rad" if dir_h == 'right' else "水平保持")
+                    v_desc = f"向上{abs(pitch_delta):.3f}rad" if dir_v == 'up' else (f"向下{abs(pitch_delta):.3f}rad" if dir_v == 'down' else "垂直保持")
+
+                    print(f"🎯 目标{target_id} | rel=({rel_x:.2f},{rel_y:.2f}) | {h_desc}, {v_desc}")
                 else:
                     print(f"❌ 发送失败")
             else:
                 self.stats['no_moves'] += 1
                 # 每10次打印一次状态
                 if self.stats['no_moves'] % 10 == 0:
-                    print(f"✅ 目标{target_id}在中心区域 | rel_x={rel_x:.3f} | 保持位置")
+                    print(f"✅ 目标{target_id}在中心区域 | rel=({rel_x:.2f},{rel_y:.2f}) | 保持位置")
 
         except FileNotFoundError:
             print(f"⚠️  坐标文件不存在: {coords_file}")
@@ -198,15 +276,20 @@ class HorizontalTracker:
     def print_stats(self):
         """打印统计信息"""
         print("\n" + "="*60)
-        print("📊 跟踪统计")
+        print("📊 双向跟踪统计")
         print("="*60)
         print(f"总更新次数: {self.stats['total_updates']}")
-        print(f"向左移动: {self.stats['left_moves']}")
-        print(f"向右移动: {self.stats['right_moves']}")
-        print(f"保持位置: {self.stats['no_moves']}")
-        print(f"丢失帧数: {self.stats['lost_frames']}")
-        print(f"回到零位: {self.stats['resets_to_zero']} 次")
-        print(f"错误次数: {self.stats['errors']}")
+        print(f"\n水平方向:")
+        print(f"  向左移动: {self.stats['left_moves']}")
+        print(f"  向右移动: {self.stats['right_moves']}")
+        print(f"\n垂直方向:")
+        print(f"  向上移动: {self.stats['up_moves']}")
+        print(f"  向下移动: {self.stats['down_moves']}")
+        print(f"\n其他:")
+        print(f"  保持位置: {self.stats['no_moves']}")
+        print(f"  丢失帧数: {self.stats['lost_frames']}")
+        print(f"  回到零位: {self.stats['resets_to_zero']} 次")
+        print(f"  错误次数: {self.stats['errors']}")
         print("="*60 + "\n")
 
     def close(self):
@@ -215,7 +298,7 @@ class HorizontalTracker:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='水平方向左右跟踪算法')
+    parser = argparse.ArgumentParser(description='双向跟踪算法（水平+垂直）')
     parser.add_argument('--coords', type=str, default='tracker_coords.json',
                        help='坐标JSON文件路径（默认：tracker_coords.json）')
     parser.add_argument('--serial', type=str, default='/dev/ttyS8',
@@ -223,9 +306,9 @@ def main():
     parser.add_argument('--baudrate', type=int, default=115200,
                        help='波特率（默认：115200）')
     parser.add_argument('--center-start', type=float, default=0.375,
-                       help='中心区域左边界（默认：0.375 = 3/8）')
+                       help='中心区域边界（默认：0.375 = 3/8，适用于水平和垂直）')
     parser.add_argument('--center-end', type=float, default=0.625,
-                       help='中心区域右边界（默认：0.625 = 5/8）')
+                       help='中心区域边界（默认：0.625 = 5/8，适用于水平和垂直）')
     parser.add_argument('--deadzone', type=float, default=0.02,
                        help='死区大小（默认：0.02）')
     parser.add_argument('--max-delta', type=float, default=0.15,
@@ -242,11 +325,12 @@ def main():
     args = parser.parse_args()
 
     print("="*60)
-    print("水平方向左右跟踪算法")
+    print("双向跟踪算法（水平+垂直）")
     print("="*60)
     print(f"坐标文件: {args.coords}")
     print(f"串口: {args.serial} @ {args.baudrate}")
     print(f"中心区域: {args.center_start*100:.1f}% - {args.center_end*100:.1f}%")
+    print(f"  （适用于水平和垂直两个方向）")
     print(f"死区: ±{args.deadzone*100:.1f}%")
     print(f"最大转动: {args.max_delta} rad")
     print(f"比例系数: {args.kp}")
@@ -255,7 +339,7 @@ def main():
     print("="*60 + "\n")
 
     # 创建跟踪器
-    tracker = HorizontalTracker(
+    tracker = BidirectionalTracker(
         serial_port=args.serial,
         baudrate=args.baudrate,
         center_zone_start=args.center_start,

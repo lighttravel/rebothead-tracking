@@ -55,8 +55,8 @@ def check_files():
         print(f"{Colors.RED}错误: 找不到 person_tracking.py{Colors.NC}")
         sys.exit(1)
 
-    if not Path('horizontal_tracking.py').exists():
-        print(f"{Colors.RED}错误: 找不到 horizontal_tracking.py{Colors.NC}")
+    if not Path('bidirectional_tracking.py').exists():
+        print(f"{Colors.RED}错误: 找不到 bidirectional_tracking.py{Colors.NC}")
         sys.exit(1)
 
     if not Path('yolov8.rknn').exists():
@@ -139,9 +139,9 @@ def main():
         time.sleep(2)
 
         # 启动电机控制程序
-        print(f"{Colors.GREEN}[2/2] 启动电机控制程序...{Colors.NC}")
+        print(f"{Colors.GREEN}[2/2] 启动双向电机控制程序...{Colors.NC}")
         motor_cmd = [
-            'python3', 'horizontal_tracking.py',
+            'python3', 'bidirectional_tracking.py',
             '--coords', CONFIG['COORDS_FILE'],
             '--serial', CONFIG['SERIAL_PORT'],
             '--baudrate', CONFIG['BAUDRATE'],
