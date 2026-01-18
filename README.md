@@ -1,0 +1,2 @@
+# rebothead-tracking
+基于rk3576开发板和高擎5047_36电机的yolov8辅助机器人头部跟踪项目
