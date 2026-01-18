@@ -70,19 +70,37 @@ def main():
         print()
 
         # 测试1: 电机转动到 +0.5 弧度
-        print("[测试 1/3] 电机21 转动到 +0.5 弧度")
+        print("[测试 1/6] 电机21 转动到 +0.5 弧度")
         send_motor_command(ser, 0.5, 0.0)
         time.sleep(2)  # 等待电机运动
 
         # 测试2: 增量控制
         print()
-        print("[测试 2/3] 电机21 再转动 +0.2 弧度（增量）")
+        print("[测试 2/6] 电机21 再转动 +0.2 弧度（增量）")
         send_motor_delta(ser, 0.2, 0.0)
         time.sleep(2)
 
         # 测试3: 回到零位
         print()
-        print("[测试 3/3] 回到零位")
+        print("[测试 3/6] 回到零位")
+        send_motor_command(ser, 0.0, 0.0)
+        time.sleep(2)
+
+        # 测试4: 电机22转动到 +0.3 弧度
+        print()
+        print("[测试 4/6] 电机22 转动到 +0.3 弧度")
+        send_motor_command(ser, 0.0, 0.3)
+        time.sleep(2)  # 等待电机运动
+
+        # 测试5: 电机22增量控制
+        print()
+        print("[测试 5/6] 电机22 再转动 -0.1 弧度（增量）")
+        send_motor_delta(ser, 0.0, -0.1)
+        time.sleep(2)
+
+        # 测试6: 两个电机都回到零位
+        print()
+        print("[测试 6/6] 两个电机都回到零位")
         send_motor_command(ser, 0.0, 0.0)
         time.sleep(2)
 

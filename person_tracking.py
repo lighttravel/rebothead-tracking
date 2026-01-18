@@ -713,12 +713,12 @@ def main():
                        help='HTTP 端口')
     parser.add_argument('--stream-fps', type=int, default=30,
                        help='推流帧率（默认30）')
-    parser.add_argument('--detect-fps', type=int, default=5,
-                       help='检测帧率（默认5，适合电机跟踪）')
+    parser.add_argument('--detect-fps', type=int, default=8,
+                       help='检测帧率（默认8）')
     parser.add_argument('--show-all', action='store_true',
                        help='显示所有跟踪目标（默认只显示主目标）')
-    parser.add_argument('--output-coords', type=str, default='/tmp/tracker_coords.json',
-                       help='输出坐标到文件（默认：/tmp/tracker_coords.json）')
+    parser.add_argument('--output-coords', type=str, default='tracker_coords.json',
+                       help='输出坐标到文件（默认：tracker_coords.json）')
 
     args = parser.parse_args()
 
